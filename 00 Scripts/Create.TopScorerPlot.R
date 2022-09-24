@@ -1,0 +1,70 @@
+# The purpose of this script is to create a top scorers plots with an underlying
+# xG-based simulated distribution for context
+
+# Load the required packages
+library(tidyverse)
+
+# Read in the ShotData
+ShotData <- readRDS("~/GitHub/Football/01 Data/ShotData.RDS")
+
+# Define the function which generates the plots from the ShotData
+Create.TopScorerPlot <- function(kLeague = "EPL",
+                                 kSeason = 2022,
+                                 kTopScorerNumber = 10,
+                                 kNumberOfSims = 10000){
+  
+  # Isolate the chosen league and season
+  df <- ShotData %>%
+    filter(league == kLeague,
+           season == kSeason) %>%
+    mutate(Goal = as.numeric(result == "Goal"))
+  
+  # Derive the top scorer list
+  TopScorerList <- df %>%
+    group_by(player) %>%
+    summarize(Goals = sum(Goal),
+              xG = sum(xG)) %>%
+    arrange(-Goals, -xG) %>%
+    head(n = kTopScorerNumber)
+  
+  # Consider only players who appear in the list
+  df <- df %>%
+    filter(player %in% TopScorerList$player) %>%
+    mutate(player = factor(player, levels = rev(TopScorerList$player)))
+  
+  # Create the graphic
+  p <- df %>%
+    slice(rep(1:n(), each = kNumberOfSims)) %>%
+    mutate(ID = rep(c(1:kNumberOfSims), times = nrow(df)),
+           SimGoal = rbinom(n(),1,xG),
+           SimGoal = (ID == 1)*Goal + (ID != 1)*SimGoal) %>%
+    group_by(player, ID) %>%
+    summarize(SimGoals = sum(SimGoal)) %>%
+    group_by(player, SimGoals) %>%
+    summarize(Frequency = n(),
+              Probability = Frequency/kNumberOfSims) %>%
+    ggplot(aes(x = SimGoals, y = player)) +
+    geom_tile(aes(fill = Probability)) +
+    geom_segment(data = TopScorerList,
+               aes(x = -0.5, xend = Goals, yend = player), colour = "red") +
+    geom_point(data = TopScorerList,
+               aes(x = Goals), colour = "red", size = 2) +
+    scale_fill_viridis_c() +
+    scale_x_continuous(expand = c(0,0),
+                       breaks = c(0:100)) +
+    theme_minimal() +
+    theme(legend.position = "none") +
+    labs(title = paste(kSeason, "/",kSeason+1, " ", kLeague, ": Top Scorers", sep = ""),
+         subtitle = "Outcome compared with xG-based simulations",
+         x = "Number of Goals",
+         y = "")
+  
+  return(p)
+}
+
+Create.TopScorerPlot()
+Create.TopScorerPlot(kLeague = "La Liga")
+Create.TopScorerPlot(kLeague = "Bundesliga")
+Create.TopScorerPlot(kLeague = "Ligue 1")
+Create.TopScorerPlot(kLeague = "Serie A")
+
